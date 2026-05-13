@@ -2,8 +2,8 @@
 
 # Configuración
 USERNAME="polankoak2"
-REPOSITORY="prog2_tarea2"
-OUTPUT_FILE="/Users/polankoak/Documents/Github/branches.txt"
+REPOSITORY="poyectoTitulo"
+OUTPUT_FILE="/home/polankoak/IACC/salida/branches.txt"
 
 # Función para obtener la fecha de creación de una rama
 get_branch_creation_date() {
@@ -20,7 +20,7 @@ calculate_days_difference() {
 
 # GitHub
 echo "Branches en GitHub creadas hace más de 30 días:" >> "$OUTPUT_FILE"
-for branch in $(git ls-remote --heads https://$USERNAME@github.com/$USERNAME/$REPOSITORY.git | awk -F'/' '{print $NF}'); do
+for branch in $(git ls-remote --heads git@github.com:$USERNAME/$REPOSITORY.git | awk -F'/' '{print $NF}'); do
     creation_date=$(get_branch_creation_date $branch)
     days_difference=$(calculate_days_difference $creation_date "$(date +'%Y-%m-%d')")
     
