@@ -8,7 +8,8 @@ OUTPUT_FILE="/home/polankoak/IACC/salida/branches.txt"
 # Función para obtener la fecha de creación de una rama
 get_branch_creation_date() {
     branch_name="$1"
-    git show --no-patch --format=%ci $(git rev-list -1 $branch_name) | awk '{print $1}'
+
+    git reflog show --date=short --format="%cd" "$branch_name" | tail -1
 }
 
 # Función para calcular la diferencia en días entre dos fechas
