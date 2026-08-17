@@ -1,40 +1,105 @@
 #!/bin/bash
 
-# Configuración
-USERNAME="tu_usuario"
-REPOSITORY="tu_repositorio"
-OUTPUT_FILE="branches.txt"
-DELETE_BRANCHES=true  # Cambia a false si no deseas eliminar las branches
+# ==========================================
+# CONFIGURACIÓN DEL USUARIO
+# ==========================================
+DRY_RUN=true
 
-# Función para obtener la fecha de creación de una rama
-get_branch_creation_date() {
-    branch_name="$1"
-    git show --no-patch --format=%ci $(git rev-list -1 $branch_name) | awk '{print $1}'
-}
+# Configuración de Rutas
+REPO_URL="git@github.com:polankoak2/proyectoTitulo.git"
+REPO_PATH="/Users/polankoak/Documents/IACC/2026/proyTitulo/proyectoTitulo_temporal"
+OUTPUT_FILE="/Users/polankoak/Documents/IACC/2026/proyTitulo/salida/branches.txt"
+GIT_CMD="/usr/bin/git"
 
-# Función para calcular la diferencia en días entre dos fechas
-calculate_days_difference() {
-    start_date="$1"
-    end_date="$2"
-    echo $(( ( $(date -ud "$end_date" +'%s') - $(date -ud "$start_date" +'%s') ) / 60 / 60 / 24 ))
-}
+# ==========================================
+# INICIO DEL PROCESO
+# ==========================================
 
-echo "Branches en GitHub creadas hace más de 30 días:" >> "$OUTPUT_FILE"
-for branch in $(git ls-remote --heads https://$USERNAME@github.com/$USERNAME/$REPOSITORY.git | awk -F'/' '{print $NF}'); do
-    creation_date=$(get_branch_creation_date $branch)
-    days_difference=$(calculate_days_difference $creation_date "$(date +'%Y-%m-%d')")
+# Asegurar que el directorio exista
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# NOTA: Ahora usamos '>>' para conservar todo el registro anterior
+echo "" >> "$OUTPUT_FILE"
+echo "=====================================================================" >> "$OUTPUT_FILE"
+if [ "$DRY_RUN" = true ]; then
+    echo " REPORTE DE SIMULACIÓN: RAMAS DETECTADAS PARA BORRAR (>30 DÍAS)" >> "$OUTPUT_FILE"
+    echo " [AVISO] Ninguna rama ha sido eliminada del servidor remoto." >> "$OUTPUT_FILE"
+else
+    echo " REPORTE REAL: RAMAS ELIMINADAS POR ANTIGÜEDAD (>30 DÍAS)" >> "$OUTPUT_FILE"
+fi
+echo " Ejecutado por Cron el: $(date +"%Y-%m-%d %H:%M:%S")" >> "$OUTPUT_FILE"
+echo "=====================================================================" >> "$OUTPUT_FILE"
+
+# Clonación automática temporal
+if [ -d "$REPO_PATH" ]; then
+    rm -rf "$REPO_PATH"
+fi
+
+$GIT_CMD clone "$REPO_URL" "$REPO_PATH" > /dev/null 2>&1
+
+if [ $? -ne 0 ]; then
+    echo "[$(date +"%Y-%m-%d %H:%M:%S")] ERROR CRÍTICO: No se pudo clonar el repositorio." >> "$OUTPUT_FILE"
+    exit 1
+fi
+
+cd "$REPO_PATH" || exit 1
+
+# Función para obtener los días de antigüedad
+get_branch_days_old() {
+    local branch_name="$1"
+    local primer_commit
     
-    if [ $days_difference -gt 30 ]; then
-        echo "$branch ($days_difference días)" >> "$OUTPUT_FILE"
+    local main_branch
+    main_branch=$($GIT_CMD symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@refs/remotes/@@')
+    [ -z "$main_branch" ] && main_branch="origin/main"
+
+    primer_commit=$($GIT_CMD rev-list --reverse "$main_branch".."$branch_name" | head -n 1)
+    
+    if [ -z "$primer_commit" ]; then
+        primer_commit=$($GIT_CMD rev-parse "$branch_name")
+    fi
+
+    local commit_timestamp
+    commit_timestamp=$($GIT_CMD show --no-patch --format=%ct "$primer_commit")
+    local current_timestamp
+    current_timestamp=$(date +%s)
+    
+    echo $(( (current_timestamp - commit_timestamp) / 86400 ))
+}
+
+# Variable de control para saber si se encontraron ramas en esta ejecución
+ramas_detectadas=0
+
+# Listado seguro de ramas
+$GIT_CMD for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -viE 'HEAD|main|master|develop' | while read -r branch; do
+    
+    if [ -z "$branch" ] || [ "$branch" = "origin" ]; then
+        continue
+    fi
+
+    days_difference=$(get_branch_days_old "$branch")
+    
+    if [ "$days_difference" -gt 30 ]; then
+        ramas_detectadas=$((ramas_detectadas + 1))
+        clean_branch_name="${branch#origin/}"
+        fecha_registro=$(date +"%Y-%m-%d %H:%M:%S")
         
-        # Eliminar la branch si DELETE_BRANCHES es true
-        if [ "$DELETE_BRANCHES" = true ]; then
-            echo "Eliminando branch $branch"
-            git push origin --delete $branch
+        if [ "$DRY_RUN" = true ]; then
+            echo "[$fecha_registro] DETECTADA (POR BORRAR): $clean_branch_name | Antigüedad: $days_difference días" >> "$OUTPUT_FILE"
+        else
+            $GIT_CMD push origin --delete "$clean_branch_name" > /dev/null 2>&1
+            
+            if [ $? -eq 0 ]; then
+                echo "[$fecha_registro] BORRADA: $clean_branch_name | Antigüedad: $days_difference días" >> "$OUTPUT_FILE"
+            else
+                echo "[$fecha_registro] ERROR AL BORRAR: $clean_branch_name | Antigüedad: $days_difference días" >> "$OUTPUT_FILE"
+            fi
         fi
     fi
 done
 
-echo "Proceso completado. Las branches creadas hace más de 30 días se han listado y, si se habilitó, eliminado en $OUTPUT_FILE"
+# Limpieza de la carpeta temporal
+cd ..
+rm -rf "$REPO_PATH"
 
-
+echo "=====================================================================" >> "$OUTPUT_FILE"
